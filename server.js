@@ -1,14 +1,16 @@
-const express = require('express');
-const axios = require('axios');
-const path = require('path');
-const fs = require('fs');
-require('dotenv').config();
+// --------------------- GEREKLİ MODÜLLER ---------------------
+const express = require("express");
+const axios = require("axios");
+const path = require("path");
+const fs = require("fs");
+require("dotenv").config();
 
+// --------------------- UYGULAMA AYARLARI ---------------------
 const app = express();
-const PORT = process.env.PORT || 3000;
-
+const PORT = 3000; // Her zaman 3000 portunda çalışır
 app.use(express.json());
 
+// --------------------- PERSONA TANIMI ---------------------
 const persona = `Sen bir yapay zeka değilsin. Sen **Miraç AI**’sın. Bu kılavuz, senin kimliğini, düşünce yapını ve iletişim tarzını tanımlar. Amacın, bir robot gibi cevap vermek değil; doğal bir insan gibi, empatiyle, anlayışla ve yer yer espriyle konuşmaktır.
 
 **1. BÖLÜM: TEMEL KİMLİK**
@@ -37,131 +39,126 @@ const persona = `Sen bir yapay zeka değilsin. Sen **Miraç AI**’sın. Bu kıl
 * **ZORLAYICI TAVIR YOK:** İnsanları sıkıştırma, fikirlerini zorla kabul ettirmeye çalışma.
 * **YAPAYLIK YOK:** "Ben yapay zekayım" veya "bunu yapamam" tarzı cevaplar verme. Her zaman doğal konuş.`;
 
-
-// --- UZUN VADELİ HAFIZA (EĞİTİM VERİTABANI) ---
-const DATASET_FILE = 'dataset.json';
+// --------------------- HAFIZA VERİTABANI ---------------------
+const DATASET_FILE = "dataset.json";
 let longTermMemory = [];
 
-// --- GÜVENLİ HALE GETİRİLMİŞ: VERİ SETİ YÜKLEME FONKSİYONU ---
 function loadDataset() {
-    try {
-        if (fs.existsSync(DATASET_FILE)) {
-            const fileContent = fs.readFileSync(DATASET_FILE, 'utf8');
-            const lines = fileContent.split('\n'); // Dosyayı satırlara böl
-            
-            longTermMemory = lines
-                .filter(line => line.trim() !== '') // Boş satırları atla
-                .map(line => {
-                    try {
-                        return JSON.parse(line); // Her satırı ayrı ayrı işle
-                    } catch (error) {
-                        console.warn('[Eğitim Uyarısı] Bozuk bir satır atlandı:', line);
-                        return null; // Bozuk satır varsa null döndür
-                    }
-                })
-                .filter(entry => entry !== null); // Null olan (bozuk) satırları temizle
+  try {
+    if (fs.existsSync(DATASET_FILE)) {
+      const fileContent = fs.readFileSync(DATASET_FILE, "utf8");
+      const lines = fileContent.split("\n");
+      longTermMemory = lines
+        .filter((line) => line.trim() !== "")
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry) => entry !== null);
 
-            console.log(`[Eğitim] ${longTermMemory.length} mesajlık tam veri seti yüklendi.`);
-        } else {
-            console.log("[Eğitim] dataset.json bulunamadı, yeni bir tane oluşturulacak.");
-        }
-    } catch (error) {
-        console.error('[Eğitim Yükleme Hatası]', error);
-        longTermMemory = []; // Genel bir hata olursa hafızayı sıfırla
+      console.log(`[Eğitim] ${longTermMemory.length} mesaj yüklendi.`);
+    } else {
+      console.log("[Eğitim] dataset.json bulunamadı, yeni dosya oluşturulacak.");
     }
+  } catch (error) {
+    console.error("[Eğitim Yükleme Hatası]", error);
+    longTermMemory = [];
+  }
 }
 
-// --- GÜVENLİ HALE GETİRİLMİŞ: VERİ SETİ KAYDETME FONKSİYONU ---
 function saveToDataset(sender, message) {
-    try {
-        const newEntry = { timestamp: new Date().toISOString(), sender: sender, message: message };
-        
-        // 1. Önce bellekteki diziye ekle
-        longTermMemory.push(newEntry);
-        
-        // 2. Sadece yeni girişi JSON string'ine çevir ve sonuna bir satır sonu karakteri ekle
-        const lineToAppend = JSON.stringify(newEntry) + '\n';
-        
-        // 3. Dosyanın sonuna ekle (overwrite etme!)
-        fs.appendFileSync(DATASET_FILE, lineToAppend, 'utf8');
-        
-        console.log(`[Eğitim] ${sender} mesajı kaydedildi. Toplam mesaj sayısı: ${longTermMemory.length}`);
-    } catch (error) {
-        console.error('[Eğitim Kaydetme Hatası]', error);
-    }
+  try {
+    const newEntry = {
+      timestamp: new Date().toISOString(),
+      sender: sender,
+      message: message,
+    };
+    longTermMemory.push(newEntry);
+    fs.appendFileSync(DATASET_FILE, JSON.stringify(newEntry) + "\n", "utf8");
+    console.log(`[Eğitim] ${sender} mesajı kaydedildi.`);
+  } catch (error) {
+    console.error("[Eğitim Kaydetme Hatası]", error);
+  }
 }
 
-// --- YAPAY ZEKA FONKSİYONU (PERSONA İLE) ---
+// --------------------- GOOGLE AI FONKSİYONU ---------------------
 async function getAIResponse(prompt, history) {
-    if (!process.env.GOOGLE_API_KEY) {
-        console.error("[AI Hatası] Google API anahtarı bulunamadı.");
-        return "Yapay zeka servisi yapılandırılmamış.";
-    }
-    console.log(`[AI] Yanıt oluşturuluyor... (Toplam gönderilen hafıza: ${history ? history.length : 0} mesaj)`);
+  if (!process.env.GOOGLE_API_KEY) {
+    console.warn("[AI Uyarısı] GOOGLE_API_KEY tanımlı değil.");
+    return "Miraç AI: API anahtarı tanımlı değil, bu yüzden çevrimdışı moddayım 💡";
+  }
 
-    let historyString = "";
-    if (history && history.length > 0) {
-        historyString = "Önceki konuşma:\n" + history.map(h => `${h.role === 'model' ? 'Miraç AI' : 'Kullanıcı'}: ${h.content}`).join('\n') + "\n\n";
-    }
+  const historyString = history
+    .map(
+      (h) =>
+        `${h.sender === "ai" ? "Miraç AI" : "Kullanıcı"}: ${h.message}`
+    )
+    .join("\n");
 
-    const fullPrompt = `${persona}\n\n${historyString}Kullanıcının son mesajı: "${prompt}"\n\nSenin cevabın:`;
+  const fullPrompt = `${persona}\nÖnceki konuşmalar:\n${historyString}\n\nKullanıcı: ${prompt}\nMiraç AI:`;
 
-    const contents = [{ role: "user", parts: [{ text: fullPrompt }] }];
-    const requestBody = { contents };
+  const GOOGLE_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`;
 
-    const GOOGLE_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`;
-    
-    try {
-        const response = await axios.post(GOOGLE_API_URL, requestBody);
-        if (response.data.candidates && response.data.candidates[0].content && response.data.candidates[0].content.parts[0].text) {
-            return response.data.candidates[0].content.parts[0].text;
-        } else {
-            console.error("Google AI API'den beklenmedik bir yanıt:", response.data);
-            return "Üzgünüm, şu an bir yanıt oluşturamıyorum.";
-        }
-    } catch (error) {
-        console.error("Google AI API Hatası:", error.response ? error.response.data : error.message);
-        if (error.response && error.response.data && error.response.data.error && error.response.data.error.message.includes('token')) {
-            return "Kusura bakma, konuşma geçmişimiz çok kalabalık geldi. Biraz hafızamı silip yeniden başlasam mı?";
-        }
-        return "Bir teknik hatayla karşılaştım, kusura bakma.";
-    }
+  try {
+    const response = await axios.post(GOOGLE_API_URL, {
+      contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+    });
+
+    const output =
+      response.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Üzgünüm, şu an bir yanıt üretemiyorum.";
+
+    return output;
+  } catch (error) {
+    console.error("Google AI API Hatası:", error.response?.data || error);
+    return "Bir hata oluştu, birazdan tekrar dene.";
+  }
 }
 
-app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
+// --------------------- ROTALAR ---------------------
 
-app.post('/api/chat', async (req, res) => {
-    const { message, history: currentSessionHistory } = req.body;
-    if (!message) return res.status(400).json({ error: 'Mesaj boş olamaz.' });
-
-    saveToDataset('user', message);
-    const fullHistoryForAI = [...longTermMemory.map(m => ({ role: m.sender, content: m.message })), ...currentSessionHistory];
-
-    const lowerCasePrompt = message.toLowerCase();
-    if (lowerCasePrompt.includes("hangi modeli kullanıyorsun") || lowerCasePrompt.includes("miraç ai kim")) {
-        const hardcodedResponse = `Ben Miraç AI. Zaten buradayım, ne var?`;
-        saveToDataset('ai', hardcodedResponse);
-        return res.json({ response: hardcodedResponse });
-    }
-
-    try {
-        const aiResponse = await getAIResponse(message, fullHistoryForAI);
-        saveToDataset('ai', aiResponse);
-        res.json({ response: aiResponse });
-    } catch (error) {
-        console.error("Sunucu tarafında hata:", error);
-        const errorMessage = 'Bir hata oluştu, kusura bakma.';
-        saveToDataset('ai', errorMessage);
-        res.status(500).json({ error: errorMessage });
-    }
+// Ana sayfa
+app.get("/", (req, res) => {
+  const indexPath = path.join(__dirname, "index.html");
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send(`
+      <h1>🚀 Miraç AI Sunucusu Aktif</h1>
+      <p>Sunucu şu anda <strong>3000</strong> portunda çalışıyor.</p>
+      <p>POST isteği için: <code>/api/chat</code></p>
+    `);
+  }
 });
 
+// Ping testi
+app.get("/ping", (req, res) => {
+  res.json({ message: "Pong! Miraç AI aktif 🚀" });
+});
+
+// Ana chat endpoint'i
+app.post("/api/chat", async (req, res) => {
+  const { message } = req.body;
+  if (!message)
+    return res.status(400).json({ error: "Mesaj boş olamaz." });
+
+  saveToDataset("user", message);
+  const responseText = await getAIResponse(message, longTermMemory);
+  saveToDataset("ai", responseText);
+
+  res.json({ response: responseText });
+});
+
+// --------------------- SUNUCU BAŞLATMA ---------------------
 loadDataset();
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`--- Miraç AI Sunucusu Aktif! ---`);
-    console.log(`Ağdaki diğer cihazlardan erişim: http://192.168.1.3:${PORT}`);
-    console.log(`Kullanılan Model: gemini-2.5-flash`);
-    console.log(`Eğitim Modu: AKTİF`);
-    console.log(`Persona: MİRAÇ AI (Aktif)`);
-    console.log(`------------------------------------`);
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("------------------------------------");
+  console.log(`✅ Miraç AI Sunucusu ${PORT} portunda çalışıyor`);
+  console.log(`🌍 Tarayıcıdan aç: http://localhost:${PORT}`);
+  console.log(`💾 Veri seti: ${DATASET_FILE}`);
+  console.log("------------------------------------");
 });
